@@ -1,0 +1,460 @@
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.io.IOException;
+import java.util.Calendar;
+import java.util.Date;
+
+import org.hamcrest.CoreMatchers;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
+import org.springframework.boot.test.json.JacksonTester;
+import org.springframework.boot.test.json.JsonContent;
+import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.test.context.junit4.SpringRunner;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+@RunWith(SpringRunner.class)
+@SpringBootTest(
+		webEnvironment = WebEnvironment.RANDOM_PORT, 
+		properties = { 
+					"logging.fluentd.host=localhost",
+					"logging.fluentd.port=24224",
+					"mongo.host=localhost",
+					"mongo.port=27017",
+					"mongo.user_database=",
+					"mongo.username=",
+					"mongo.password=",
+					"proxy.hostname=localhost",
+					"security.oauth2.resource.user-info-uri=",
+					"security.oauth2.protected=",
+					"security.oauth2.client.client-id=",
+					"security.oauth2.client.client-secret=",
+					"ssl.verifying.disable=false"
+				})
+@AutoConfigureMockMvc
+public class ObjectApplicationTests {
+
+	@Autowired
+	private TestRestTemplate restTemplate;
+	@Autowired
+	private MockMvc mvc;
+	private JacksonTester<JsonNode> json;
+	private String objectCtrlUrl = "/api/1.0/";
+	private String DB_NAME = "test";
+
+	@Before
+	public void setup() {
+		ObjectMapper objectMapper = new ObjectMapper();
+		JacksonTester.initFields(this, objectMapper);
+	}
+
+	@Test
+	public void indexPage() {
+		ResponseEntity<String> response = this.restTemplate.getForEntity(objectCtrlUrl, String.class);
+		assertThat(response.getStatusCodeValue()).isEqualTo(200);
+		assertThat(response.getBody(), CoreMatchers.containsString("Object Storage Micro Service App"));
+	}
+	
+	@Test
+	public void testAll() throws Exception {
+		String collectionName = Long.toString(Calendar.getInstance().getTime().getTime());
+		String id_1 = Long.toString(Calendar.getInstance().getTime().getTime());
+		createObject(collectionName, id_1);
+		updateObject(collectionName, id_1);
+		String id_2 = Long.toString(Calendar.getInstance().getTime().getTime());
+		createObject(collectionName, id_2);
+		assertThat(countObject(collectionName)).isEqualTo(2);
+		assertThat(distinct(collectionName)).isEqualTo(2);
+		assertThat(queryAllObjects(collectionName)).isEqualTo(2);
+		assertThat(aggregate(collectionName)).isEqualTo(2);
+		getObject(collectionName, id_1);
+		getObject(collectionName, id_2);
+		deleteObject(collectionName, id_2);
+		assertThat(countObject(collectionName)).isEqualTo(1);
+		assertThat(distinct(collectionName)).isEqualTo(1);
+		assertThat(queryAllObjects(collectionName)).isEqualTo(1);
+		assertThat(aggregate(collectionName)).isEqualTo(1);
+		deleteObject(collectionName, id_1);
+		assertThat(countObject(collectionName)).isEqualTo(0);
+		assertThat(distinct(collectionName)).isEqualTo(0);
+		assertThat(queryAllObjects(collectionName)).isEqualTo(0);
+		assertThat(aggregate(collectionName)).isEqualTo(0);
+		String id_3 = createObject(collectionName);
+		assertThat(countObject(collectionName)).isEqualTo(1);
+		assertThat(distinct(collectionName)).isEqualTo(1);
+		assertThat(queryAllObjects(collectionName)).isEqualTo(1);
+		assertThat(aggregate(collectionName)).isEqualTo(1);
+		deleteObject(collectionName, id_3);
+		assertThat(countObject(collectionName)).isEqualTo(0);
+		assertThat(distinct(collectionName)).isEqualTo(0);
+		assertThat(queryAllObjects(collectionName)).isEqualTo(0);
+		assertThat(aggregate(collectionName)).isEqualTo(0);
+		deleteCollection(collectionName);
+	}
+
+	public void createObject(String collection, String id) throws Exception {
+		mvc.perform(post(objectCtrlUrl + "/" + DB_NAME + "/" + collection + "/" + id)
+				.content("{ 'test' : '" + (new Date()).getTime() + "' }")
+                .contentType("application/json"))
+				.andExpect(status().isCreated());
+	}
+	
+	public void updateObject(String collection, String id) throws Exception {
+		mvc.perform(put(objectCtrlUrl + "/" + DB_NAME + "/" + collection + "/" + id)
+				.content("{ 'test' : '" + (new Date()).getTime() + "' }")
+				.contentType("application/json"))
+		.andExpect(status().isOk());
+	}
+	
+	public String createObject(String collection) throws Exception {
+		MvcResult result = mvc.perform(post(objectCtrlUrl + "/" + DB_NAME + "/" + collection)
+				.content("{ 'test' : '" + (new Date()).getTime() + "' }")
+				.contentType("application/json"))
+				.andExpect(status().isCreated())
+				.andReturn();
+		return (new JSONObject(result.getResponse().getContentAsString())).getJSONObject("_id").getString("$oid");
+	}
+	
+	public void createObjects(String collection) throws Exception {
+		MvcResult result = mvc.perform(post(objectCtrlUrl + "/multi/" + DB_NAME + "/" + collection)
+				.content("[{ 'test' : '" + (new Date()).getTime() + "' },{ 'test' : '" + (new Date()).getTime() + "' }{ 'test' : '" + (new Date()).getTime() + "' }]")
+				.contentType("application/json"))
+				.andExpect(status().isCreated())
+				.andReturn();
+		JSONObject body = new JSONObject(result.getResponse().getContentAsString());
+		assertThat(body.getInt("inserted") == 3);
+		assertThat(body.getJSONArray("ids").length() == 3);
+	}
+	
+	public void getObject(String collection, String id) throws Exception {
+		ResponseEntity<JsonNode> response = this.restTemplate.getForEntity(objectCtrlUrl + "/{db}/{collection}/{id}", JsonNode.class, DB_NAME, collection, id);
+		JsonContent<JsonNode> body = this.json.write(response.getBody());
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(body).hasJsonPathStringValue("@._id");
+		assertThat(body).hasJsonPathStringValue("@.test");
+		assertThat(body).extractingJsonPathStringValue("@._id").isEqualTo(id);
+	}
+	
+	public int countObject(String collection) throws Exception {
+		MvcResult result = mvc.perform(post(objectCtrlUrl + "/" + DB_NAME + "/" + collection + "/count")
+                .content("{}")
+                .contentType("application/json"))
+				.andExpect(status().isOk())
+				.andReturn();
+		return (new JSONObject(result.getResponse().getContentAsString())).getInt("count");
+	}
+	
+	public int aggregate(String collection) throws Exception {
+		String aggregate = "[ { $group: { _id: '$test', count: { $sum: 1 } } }, { $sort: { count: -1  } } ]";
+		MvcResult result = mvc.perform(post(objectCtrlUrl + "/" + DB_NAME + "/" + collection + "/aggregate")
+				.content(aggregate)
+				.contentType("application/json"))
+				.andExpect(status().isOk())
+				.andReturn();
+		return (new JSONObject(result.getResponse().getContentAsString())).getJSONArray("items").length();
+	}
+	
+	public int queryAllObjects(String collection) throws Exception {
+		MvcResult result = mvc.perform(post(objectCtrlUrl + "/" + DB_NAME + "/" + collection + "/find")
+				.content("{}")
+				.contentType("application/json"))
+				.andExpect(status().isOk())
+				.andReturn();
+		return (new JSONObject(result.getResponse().getContentAsString())).getInt("total");
+	}
+	
+	public int distinct(String collection) throws Exception {
+		MvcResult result = mvc.perform(post(objectCtrlUrl + "/" + DB_NAME + "/" + collection + "/distinct/test")
+                .content("{}")
+                .contentType("application/json"))
+				.andExpect(status().isOk())
+				.andReturn();
+		return (new JSONArray(result.getResponse().getContentAsString())).length();
+	}
+	
+	public void deleteObject(String collection, String id) throws IOException {
+		ResponseEntity<JsonNode> response = this.restTemplate.exchange(objectCtrlUrl + "/{db}/{collection}/{id}", HttpMethod.DELETE, null, JsonNode.class, DB_NAME, collection, id);
+		JsonContent<JsonNode> body = this.json.write(response.getBody());
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(body).hasJsonPathBooleanValue("@.success");
+		assertThat(body).extractingJsonPathBooleanValue("@.success").isEqualTo(true);
+	}
+	
+	public void deleteCollection(String collection) throws IOException {
+		ResponseEntity<JsonNode> response = this.restTemplate.exchange(objectCtrlUrl + "/{db}/{collection}", HttpMethod.DELETE, null, JsonNode.class, DB_NAME, collection);
+		JsonContent<JsonNode> body = this.json.write(response.getBody());
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(body).hasJsonPathBooleanValue("@.success");
+		assertThat(body).extractingJsonPathBooleanValue("@.success").isEqualTo(true);
+	}
+	
+  
+  
+  
+  
+import static org.assertj.core.api.Assertions.assertThat;
+
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
+import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.http.ResponseEntity;
+import org.springframework.test.context.junit4.SpringRunner;
+
+@RunWith(SpringRunner.class)
+@SpringBootTest(
+		webEnvironment = WebEnvironment.RANDOM_PORT, 
+		properties = { 
+					"logging.fluentd.host=localhost",
+					"logging.fluentd.port=24224",
+					"repo.host=http://localhost:9000",
+					"repo.accessKey=minio",
+					"repo.secretKey=minio123",
+					"proxy.hostname=localhost",
+					"security.oauth2.resource.user-info-uri=",
+					"security.oauth2.protected=/**",
+					"security.oauth2.client.client-id=",
+					"security.oauth2.client.client-secret=",
+					"ssl.verifying.disable=false"
+				})
+@AutoConfigureMockMvc
+public class OAuth2Test {
+
+	@Autowired
+	private TestRestTemplate restTemplate;
+	private String storageCtrlUrl = "/api/1.0/";
+
+	@Test
+	public void indexPage() {
+		ResponseEntity<String> response = this.restTemplate.getForEntity(storageCtrlUrl, String.class);
+		assertThat(response.getStatusCodeValue()).isEqualTo(401);
+	}
+
+}
+
+
+
+
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.CoreMatchers.hasItem;
+import static org.hamcrest.CoreMatchers.not;
+import static org.junit.Assert.assertThat;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.io.IOException;
+import java.util.Calendar;
+import java.util.List;
+
+import org.hamcrest.CoreMatchers;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
+import org.springframework.boot.test.json.JacksonTester;
+import org.springframework.boot.test.json.JsonContent;
+import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.context.junit4.SpringRunner;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jayway.jsonpath.JsonPath;
+
+@RunWith(SpringRunner.class)
+@SpringBootTest(
+		webEnvironment = WebEnvironment.RANDOM_PORT, 
+		properties = { 
+					"logging.fluentd.host=localhost",
+					"logging.fluentd.port=24224",
+					"repo.host=http://localhost:9000",
+					"repo.accessKey=minio",
+					"repo.secretKey=minio123",
+					"proxy.hostname=localhost",
+					"security.oauth2.resource.user-info-uri=",
+					"security.oauth2.protected=",
+					"security.oauth2.client.client-id=",
+					"security.oauth2.client.client-secret=",
+					"ssl.verifying.disable=false"
+				})
+@AutoConfigureMockMvc
+public class StorageApplicationTests {
+
+	@Autowired
+	private TestRestTemplate restTemplate;
+	@Autowired
+	private MockMvc mvc;
+	private JacksonTester<JsonNode> json;
+	private String storageCtrlUrl = "/api/1.0/";
+
+	@Before
+	public void setup() {
+		ObjectMapper objectMapper = new ObjectMapper();
+		JacksonTester.initFields(this, objectMapper);
+	}
+
+	@Test
+	public void indexPage() {
+		ResponseEntity<String> response = this.restTemplate.getForEntity(storageCtrlUrl, String.class);
+		assertThat(response.getStatusCodeValue()).isEqualTo(200);
+		assertThat(response.getBody(), CoreMatchers.containsString("S3 Storage Micro Service App"));
+	}
+
+	@Test
+	public void manageDrawer() throws IOException {
+		String drawerName = Long.toString(Calendar.getInstance().getTime().getTime());
+		createDrawer(drawerName);
+		getDrawer(drawerName);
+		List<String> drawers = getAllDrawers(-1);
+		int currentSize = drawers.size();
+		assertThat(drawers, hasItem(drawerName));
+		deleteDrawer(drawerName);
+		drawers = getAllDrawers(currentSize - 1);
+		assertThat(drawers, not(hasItem(drawerName)));
+		//deleteAllDrawer();
+	}
+
+	@Test
+	public void manageNode() throws Exception {
+		String drawerName = Long.toString(Calendar.getInstance().getTime().getTime());
+		String nodeId = drawerName + ".txt";
+		createDrawer(drawerName);
+		List<String> nodes = getAllNodes(drawerName);
+		assertThat(nodes.size()).isEqualTo(0);
+		createNode(drawerName, nodeId);
+		getNode(drawerName, nodeId);
+		String binary = downloadNode(drawerName, nodeId);
+		assertThat(binary).isEqualToIgnoringCase("Hello World");
+		updateNode(drawerName, nodeId);
+		binary = downloadNode(drawerName, nodeId);
+		assertThat(binary).isEqualToIgnoringCase("Hello World Bis");
+		getNode(drawerName, nodeId);
+		deleteNode(drawerName, nodeId);
+		deleteDrawer(drawerName);
+		// deleteAllDrawer();
+	}
+
+	public void createDrawer(String drawerName) throws IOException {
+		ResponseEntity<JsonNode> response = this.restTemplate.exchange(storageCtrlUrl + "/drawer/{name}", HttpMethod.PUT, null, JsonNode.class, drawerName);
+		JsonContent<JsonNode> body = this.json.write(response.getBody());
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+		assertThat(body).hasJsonPathStringValue("@.name");
+		assertThat(body).extractingJsonPathStringValue("@.name").isEqualTo(drawerName);
+	}
+
+	public void getDrawer(String drawerName) throws IOException {
+		ResponseEntity<JsonNode> response = this.restTemplate.getForEntity(storageCtrlUrl + "/drawer/{name}", JsonNode.class, drawerName);
+		JsonContent<JsonNode> body = this.json.write(response.getBody());
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(body).hasJsonPathStringValue("@.name");
+		assertThat(body).extractingJsonPathStringValue("@.name").isEqualTo(drawerName);
+	}
+
+	public List<String> getAllDrawers(int expectedSize) throws IOException {
+		ResponseEntity<JsonNode> response = this.restTemplate.getForEntity(storageCtrlUrl + "/drawer", JsonNode.class);
+		JsonContent<JsonNode> body = this.json.write(response.getBody());
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		List<String> names = JsonPath.read(body.getJson(), "$[*].name");
+		if (expectedSize >= 0)
+			assertThat(names.size()).isEqualTo(expectedSize);
+		return names;
+	}
+
+	public void deleteDrawer(String drawerName) throws IOException {
+		ResponseEntity<JsonNode> response = this.restTemplate.exchange(storageCtrlUrl + "/drawer/{name}", HttpMethod.DELETE, null, JsonNode.class, drawerName);
+		JsonContent<JsonNode> body = this.json.write(response.getBody());
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(body).hasJsonPathBooleanValue("@.success");
+		assertThat(body).extractingJsonPathBooleanValue("@.success").isEqualTo(true);
+	}
+
+	public void deleteAllDrawer() throws IOException {
+		List<String> drawers = getAllDrawers(-1);
+		for (String drawerName : drawers) {
+			this.restTemplate.exchange(storageCtrlUrl + "/drawer/{name}", HttpMethod.DELETE, null, JsonNode.class, drawerName);
+		}
+		getAllDrawers(0);
+	}
+
+	public List<String> getAllNodes(String drawerName) throws IOException {
+		ResponseEntity<JsonNode> response = this.restTemplate.getForEntity(storageCtrlUrl + "/drawer/nodes/{name}", JsonNode.class, drawerName);
+		JsonContent<JsonNode> body = this.json.write(response.getBody());
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		List<String> names = JsonPath.read(body.getJson(), "$[*].id");
+		return names;
+	}
+
+	public void createNode(String drawerName, String id) throws Exception {
+		MockMultipartFile file = new MockMultipartFile("file", "filename.txt", "text/plain", "Hello World".getBytes());
+		MockMultipartHttpServletRequestBuilder builder = MockMvcRequestBuilders.fileUpload(storageCtrlUrl + "/node/" + drawerName + "?id=" + id);
+		this.mvc.perform(builder.file(file)).andExpect(status().isCreated());
+	}
+
+	public void updateNode(String drawerName, String id) throws Exception {
+		MockMultipartFile file = new MockMultipartFile("file", "filename.txt", "text/plain", "Hello World Bis".getBytes());
+		MockMultipartHttpServletRequestBuilder builder = MockMvcRequestBuilders.fileUpload(storageCtrlUrl + "/node/" + drawerName + "?id=" + id);
+		builder.with(new RequestPostProcessor() {
+			@Override
+			public MockHttpServletRequest postProcessRequest(MockHttpServletRequest request) {
+				request.setMethod("PUT");
+				return request;
+			}
+		});
+		this.mvc.perform(builder.file(file)).andExpect(status().isOk());
+	}
+
+	public String downloadNode(String drawerName, String id) throws IOException {
+		ResponseEntity<String> response = this.restTemplate.getForEntity(storageCtrlUrl + "/node/{name}/dl?id={id}", String.class, drawerName, id);
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		return response.getBody();
+	}
+
+	public void getNode(String drawerName, String id) throws IOException {
+		ResponseEntity<JsonNode> response = this.restTemplate.getForEntity(storageCtrlUrl + "/node/{name}?id={id}", JsonNode.class, drawerName, id);
+		JsonContent<JsonNode> body = this.json.write(response.getBody());
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(body).hasJsonPathStringValue("@.id");
+		assertThat(body).extractingJsonPathStringValue("@.id").isEqualTo(id);
+	}
+
+	public void deleteNode(String drawerName, String id) throws IOException {
+		ResponseEntity<JsonNode> response = this.restTemplate.exchange(storageCtrlUrl + "/node/{name}?id={id}", HttpMethod.DELETE, null, JsonNode.class, drawerName, id);
+		JsonContent<JsonNode> body = this.json.write(response.getBody());
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(body).hasJsonPathBooleanValue("@.success");
+		assertThat(body).extractingJsonPathBooleanValue("@.success").isEqualTo(true);
+	}
+
+}
